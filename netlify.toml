@@ -1,0 +1,13 @@
+[build]
+  command = "pnpm i --frozen-lockfile && pnpm build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+  PNPM_VERSION = "10.4.1"   # opcional, combine com seu packageManager
+
+# SPA redirect (React Router / Vite)
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
