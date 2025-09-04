@@ -35,18 +35,11 @@ function App() {
     unidadesPorMes: 0
   })
 
-  const [maquina, setMaquina] = useState({
-    vidaUtil: 0,
-    valorMaquina: 0
-  })
-
   const [precificacao, setPrecificacao] = useState({
     unidades: 1,
-    markup: 5.0,
     imposto: 8.0,
     txCartao: 5.0,
-    custoAnuncio: 20.0,
-    percFalhas: 15.0
+    custoAnuncio: 20.0
   })
 
   const [pecas, setPecas] = useState([])
@@ -83,68 +76,67 @@ function App() {
     const lines = content.split('\n')
 
     for (const line of lines) {
-      // Extract print time from comments (e.g., PrusaSlicer/SuperSlicer format)
       const timeMatch = line.match(/; estimated printing time \(s\) = (\d+\.?\d*)/i)
       if (timeMatch && timeMatch[1]) {
         printTime = parseFloat(timeMatch[1]) / 3600 // Convert seconds to hours
       }
 
-      // Extract extrusion values (E) for weight estimation
       const eMatch = line.match(/E([\d\.-]+)/)
       if (eMatch && eMatch[1]) {
         const eValue = parseFloat(eMatch[1])
-        // Only sum positive extrusion values (movement with material extrusion)
         if (eValue > 0) {
           totalExtrusion += eValue
         }
       }
     }
 
-    // Update model state with extracted values
-    // Assuming 1mm^3 of filament is approx 0.00124g for PLA (density 1.24g/cm^3, 1cm^3 = 1000mm^3)
-    // This is a very rough estimation. Slicer usually provides exact filament usage.
-    // A more accurate weight calculation would require filament diameter and density.
-    // For simplicity, let's assume totalExtrusion is in mm and convert to grams directly
-    // based on a typical filament density and diameter (e.g., 1.75mm PLA, 1.24g/cm^3)
-    // A common approximation for 1.75mm PLA is 1m of filament = ~2.5g
-    // If totalExtrusion is in mm, then totalExtrusion / 1000 is in meters.
-    // So, estimatedWeight = (totalExtrusion / 1000) * 2.5 (grams)
     const estimatedWeight = (totalExtrusion / 1000) * 2.5 // Rough estimate for PLA
 
     setModelo(prevModelo => ({
       ...prevModelo,
-      tempo: printTime > 0 ? printTime : prevModelo.tempo, // Only update if found in G-code
-      peso: estimatedWeight > 0 ? estimatedWeight : prevModelo.peso // Only update if found
+      tempo: printTime > 0 ? printTime : prevModelo.tempo,
+      peso: estimatedWeight > 0 ? estimatedWeight : prevModelo.peso
     }))
   }
 
   // Cálculos
   const custoMateria = (custos.custoMateriaPrima / 1000) * modelo.peso
-  const kwh = (modelo.tempo * impressora.potencia * 0.5) / 1000
-  const custoEnergia = kwh * energia.custoKwh
+  const gastoEnergetico = modelo.tempo * impressora.potencia * 0.5
+  const custoEnergia = gastoEnergetico * energia.custoKwh
   const custoAcessoriosTotal = acessorios.reduce((total, acc) => total + (acc.quantidade * acc.custoUnitario), 0)
   const custoFixoPorPeca = custoFixo.unidadesPorMes > 0 ? custoFixo.valor / custoFixo.unidadesPorMes : 0
-  const amortizacao = maquina.vidaUtil > 0 ? (maquina.valorMaquina / maquina.vidaUtil) * modelo.tempo : 0
-  const falhasPct = (precificacao.percFalhas || 0) / 100
-  const baseFalhas = (custoMateria + custoEnergia + amortizacao)
-  const acrescFalhas = falhasPct * baseFalhas * 0.7
+  const falhas = 0.15 // 15%
   
-  const custoTotal = custoMateria + custoEnergia + custoAcessoriosTotal + custoFixoPorPeca + amortizacao + acrescFalhas
-  const custoUn = precificacao.unidades > 0 ? custoTotal / precificacao.unidades : 0
+  // Custo Total = Custo Matéria + Custo Energia + Custo Acessórios + Custo Fixo por Peça
+  const custoTotal = custoMateria + custoEnergia + custoAcessoriosTotal + custoFixoPorPeca
+  
+  // Custo c/ Falhas = Custo Total * (1 + % Falhas)
+  const custoTotalComFalhas = custoTotal * (1 + falhas)
+  
+  // Custo Un. = Custo c/ Falhas / Unidades por Fornada
+  const custoUn = precificacao.unidades > 0 ? custoTotalComFalhas / precificacao.unidades : 0
 
   // Preços
-  const precoConsumidorFinal = custoUn * 5 // markup 5
-  const precoLojista = custoUn * 3 // markup 3
+  // Preço Consumidor Final = Custo Un. * Markup 5
+  const precoConsumidorFinal = custoUn * 5
+  // Preço Lojista = Custo Un. * Markup 3
+  const precoLojista = custoUn * 3
 
   // Lucros Consumidor Final
-  const totalImpostosConsumidor = precoConsumidorFinal * (precificacao.imposto + precificacao.txCartao + precificacao.custoAnuncio) / 100
-  const lucroLiquidoConsumidor = precoConsumidorFinal - custoUn - totalImpostosConsumidor
+  // Total Impostos Consumidor = Preço Consumidor Final * (Imposto + Taxa Cartão + Custo Anúncio) / 100
+  const totalImpostosConsumidor = precoConsumidorFinal * ((precificacao.imposto + precificacao.txCartao + precificacao.custoAnuncio) / 100)
+  // Lucro Bruto Consumidor = Preço Consumidor Final - Custo Un.
   const lucroBrutoConsumidor = precoConsumidorFinal - custoUn
+  // Lucro Líquido Consumidor = Lucro Bruto Consumidor - Total Impostos Consumidor
+  const lucroLiquidoConsumidor = lucroBrutoConsumidor - totalImpostosConsumidor
 
   // Lucros Lojista
-  const totalImpostosLojista = precoLojista * (precificacao.imposto) / 100
-  const lucroLiquidoLojista = precoLojista - custoUn - totalImpostosLojista
+  // Total Impostos Lojista = Preço Lojista * (Imposto + Taxa Cartão) / 100
+  const totalImpostosLojista = precoLojista * ((precificacao.imposto + precificacao.txCartao) / 100)
+  // Lucro Bruto Lojista = Preço Lojista - Custo Un.
   const lucroBrutoLojista = precoLojista - custoUn
+  // Lucro Líquido Lojista = Lucro Bruto Lojista - Total Impostos Lojista
+  const lucroLiquidoLojista = lucroBrutoLojista - totalImpostosLojista
 
   const adicionarPeca = () => {
     if (!modelo.nome) return
@@ -166,7 +158,6 @@ function App() {
     setEnergia({ custoKwh: 0 })
     setAcessorios([])
     setCustoFixo({ valor: 0, unidadesPorMes: 0 })
-    setMaquina({ vidaUtil: 0, valorMaquina: 0 })
     setPrecificacao({ unidades: 1, imposto: 8.0, txCartao: 5.0, custoAnuncio: 20.0 })
   }
 
@@ -323,7 +314,7 @@ function App() {
                   />
                 </div>
                 <div className="text-sm text-muted-foreground">
-                  Consumo estimado: {kwh.toFixed(3)} kWh<br />
+                  Gasto Energético: {gastoEnergetico.toFixed(2)} kWh<br />
                   Custo Energia: R$ {custoEnergia.toFixed(2)}
                 </div>
               </CardContent>
@@ -412,36 +403,6 @@ function App() {
               </CardContent>
             </Card>
 
-            {/* Vida Útil */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Amortização da Máquina</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="vidaUtil">Vida Útil (horas)</Label>
-                  <Input
-                    id="vidaUtil"
-                    type="number"
-                    value={maquina.vidaUtil}
-                    onChange={(e) => setMaquina({...maquina, vidaUtil: parseFloat(e.target.value) || 0})}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="valorMaquina">Valor da Máquina (R$)</Label>
-                  <Input
-                    id="valorMaquina"
-                    type="number"
-                    value={maquina.valorMaquina}
-                    onChange={(e) => setMaquina({...maquina, valorMaquina: parseFloat(e.target.value) || 0})}
-                  />
-                </div>
-                <div className="text-sm text-muted-foreground">
-                  Amortização: R$ {amortizacao.toFixed(2)}
-                </div>
-              </CardContent>
-            </Card>
-
             {/* Precificação */}
             <Card>
               <CardHeader>
@@ -451,7 +412,7 @@ function App() {
                 <div>
                   <Label htmlFor="unidades">Unidades por Fornada</Label>
                   <Input
-                    id="unidades" placeholder="1"
+                    id="unidades"
                     type="number"
                     value={precificacao.unidades}
                     onChange={(e) => setPrecificacao({...precificacao, unidades: parseFloat(e.target.value) || 1})}
@@ -461,7 +422,7 @@ function App() {
                   <div>
                     <Label htmlFor="imposto">Imposto (%)</Label>
                     <Input
-                      id="imposto" placeholder="8.0"
+                      id="imposto"
                       type="number"
                       step="0.1"
                       value={precificacao.imposto}
@@ -471,7 +432,7 @@ function App() {
                   <div>
                     <Label htmlFor="txCartao">Taxa Cartão (%)</Label>
                     <Input
-                      id="txCartao" placeholder="5.0"
+                      id="txCartao"
                       type="number"
                       step="0.1"
                       value={precificacao.txCartao}
@@ -481,7 +442,7 @@ function App() {
                   <div>
                     <Label htmlFor="custoAnuncio">Custo Anúncio (%)</Label>
                     <Input
-                      id="custoAnuncio" placeholder="20.0"
+                      id="custoAnuncio"
                       type="number"
                       step="0.1"
                       value={precificacao.custoAnuncio}
